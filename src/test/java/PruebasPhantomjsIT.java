@@ -21,7 +21,7 @@ driver = new PhantomJSDriver(caps);
 driver.navigate().to("http://localhost:8080/Baloncesto/");
 assertEquals("Votacion mejor jugador liga ACB", driver.getTitle(),
 "El titulo no es correcto");
- System.out.println(driver.getTitle()
+ System.out.println(driver.getTitle());
 driver.close();
 driver.quit();
 }
