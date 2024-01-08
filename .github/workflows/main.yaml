@@ -2,69 +2,89 @@ name: CI
 on: push
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: descargar repostorio
+        uses: actions/checkout@v3
+      - name: pruebas-unitarias
+        run: mvn test
+      - name: compilar la aplicación sin repetir pruebas
+        run: mvn package -DskipTests=true
 
- build:
-  runs-on: ubuntu-latest
-  steps:
-  - name: descargar repostorio
-    uses: actions/checkout@v3
-  - name: pruebas-unitarias
-    run: mvn test
-  - name: compilar la aplicación sin repetir pruebas
-    run: mvn package -DskipTests=true
+  test:
+    needs: build
+    runs-on: self-hosted
+    steps:
+      - name: descargar repostorio
+        uses: actions/checkout@v3
+      - name: instalar aplicación en Tomcat
+        run: |
+          mvn package -DskipTests=true
+          cp -r target/Baloncesto /usr/local/tomcat/webapps
+      - name: preparar base de datos de prueba
+        run: |
+          mysql -u root < db/baloncesto.sql
+          export DATABASE_HOST="jdbc:mysql://localhost"
+          export DATABASE_PORT="3306"
+          export DATABASE_NAME="baloncesto"
+          export DATABASE_USER="usuario"
+          export DATABASE_PASS="clave"
+          sh /usr/local/tomcat/bin/catalina.sh stop
+          sh /usr/local/tomcat/bin/catalina.sh start
+      - name: realizar pruebas funcionales
+        run: |
+          mvn failsafe:integration-test failsafe:verify
 
- test:
-  needs: build
-  runs-on: self-hosted
-  steps:
-  - name: descargar repostorio
-    uses: actions/checkout@v3
-  - name: instalar aplicación en Tomcat
-    run: |
-      mvn package -DskipTests=true
-      cp -r target/Baloncesto /usr/local/tomcat/webapps
-  - name: preparar base de datos de prueba
-    run: |
-      mysql -u root < db/baloncesto.sql
-      export DATABASE_HOST="jdbc:mysql://localhost"
-      export DATABASE_PORT="3306"
-      export DATABASE_NAME="baloncesto"
-      export DATABASE_USER="usuario"
-      export DATABASE_PASS="clave"
-      sh /usr/local/tomcat/bin/catalina.sh stop
-      sh /usr/local/tomcat/bin/catalina.sh start
-  - name: realizar pruebas funcionales
-    run: |
-      mvn failsafe:integration-test failsafe:verify
+  qa:
+    needs: test
+    runs-on: self-hosted
+    continue-on-error: true
+    steps:
+      - name: calidad-codigo
+        run: |
+          mvn sonar:sonar -Dsonar.host.url=http://sonarqube:9000 -Dsonar.qualitygate.wait=true -Dsonar.login=admin -Dsonar.password=admin1
+          # echo "pruebas-funcionales"
 
- qa:
-  needs: test
-  runs-on: self-hosted
-  continue-on-error: true
-  steps:
-  - name: calidad-codigo
-    run: |
-      mvn sonar:sonar -Dsonar.host.url=http://sonarqube:9000 -Dsonar.qualitygate.wait=true -Dsonar.login=admin -Dsonar.password=admin1
-      # echo "pruebas-funcionales"
+  stage:
+    needs: qa
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v3
+      - name: Crear el archivo.war
+        run: |
+          mvn package -DskipTests=true
+      # - name: Aprobacion Manual
+      #   uses: trstringer/manual-approval@v1
+      #   with:
+      #     secret: ${{ secrets.TOKEN}}
+      #     approvers: danielahumadarubio
+      - name: Desplegar en Azure
+        uses: Azure/webapps-deploy@v2
+        with:
+          app-name: baloncesto-ahumada-pre
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PRE_PUBLISH_PROFILE }}
+          package: target/*.war
 
- deploy:
-  needs: qa
-  runs-on: ubuntu-latest
-  if: github.ref == 'refs/heads/master'
-  steps:
-  - name: Descargar repositorio
-    uses: actions/checkout@v3
-  - name: Crear el archivo.war
-    run: |
-      mvn package -DskipTests=true
-  - name: Aprobacion Manual
-    uses: trstringer/manual-approval@v1
-    with:
-      secret: ${{ secrets.TOKEN}}
-      approvers: danielahumadarubio
-  - name: Desplegar en Azure
-    uses: Azure/webapps-deploy@v2
-    with:
-      app-name: baloncesto-ahumada
-      publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-      package: target/*.war
+  deploy:
+    needs: qa
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v3
+      - name: Crear el archivo.war
+        run: |
+          mvn package -DskipTests=true
+      - name: Aprobacion Manual
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ secrets.TOKEN}}
+          approvers: danielahumadarubio
+      - name: Desplegar en Azure
+        uses: Azure/webapps-deploy@v2
+        with:
+          app-name: baloncesto-ahumada
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: target/*.war
